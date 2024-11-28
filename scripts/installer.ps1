@@ -107,20 +107,20 @@ $ScriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Resolve-Path "." }
 $Platform = Get-Platform
 switch ($Platform) {
     "Windows" {
-        $ScriptPath = "C:\Program Files\ScheduledShutdownRestart\ScheduledShutdownRestart.ps1"
+        $ScriptPath = "C:\Program Files\Morgana\morgana.ps1"
         $ConfigPath = Join-Path $ScriptRoot "..\configs\windows.xml"
-        $TaskName = "ScheduledShutdownRestart"
+        $TaskName = "Morgana"
     }
     "macOS" {
-        $ScriptPath = "/usr/local/bin/ScheduledShutdownRestart.ps1"
+        $ScriptPath = "/usr/local/bin/morgana.ps1"
         $ConfigPath = Join-Path $ScriptRoot "..\configs\macos.plist"
-        $DaemonPath = "/Library/LaunchDaemons/com.user.scheduledshutdownrestart.plist"
+        $DaemonPath = "/Library/LaunchDaemons/com.user.morgana.plist"
     }
     "Linux" {
-        $ScriptPath = "/usr/local/bin/ScheduledShutdownRestart.ps1"
+        $ScriptPath = "/usr/local/bin/morgana.ps1"
         $ConfigPath = Join-Path $ScriptRoot "..\configs"
-        $SystemdService = "/etc/systemd/system/scheduled_shutdown_restart.service"
-        $SystemdTimer = "/etc/systemd/system/scheduled_shutdown_restart.timer"
+        $SystemdService = "/etc/systemd/system/morgana.service"
+        $SystemdTimer = "/etc/systemd/system/morgana.timer"
     }
     default {
         Write-Output "Unsupported platform."
@@ -135,14 +135,14 @@ function InstallScript {
         "Windows" {
             $InstallPath = Split-Path -Parent $ScriptPath
             if (-not (Test-Path $InstallPath)) { New-Item -ItemType Directory -Path $InstallPath -Force }
-            Copy-Item (Join-Path $ScriptRoot "ScheduledShutdownRestart.ps1") -Destination $ScriptPath -Force
+            Copy-Item (Join-Path $ScriptRoot "morgana.ps1") -Destination $ScriptPath -Force
         }
         "macOS" {
-            sudo cp (Join-Path $ScriptRoot "ScheduledShutdownRestart.ps1") $ScriptPath
+            sudo cp (Join-Path $ScriptRoot "morgana.ps1") $ScriptPath
             sudo chmod +x $ScriptPath
         }
         "Linux" {
-            sudo cp (Join-Path $ScriptRoot "ScheduledShutdownRestart.ps1") $ScriptPath
+            sudo cp (Join-Path $ScriptRoot "morgana.ps1") $ScriptPath
             sudo chmod +x $ScriptPath
         }
     }
@@ -317,12 +317,12 @@ function ManageTask {
                 sudo cp (Join-Path $ConfigPath "linux.service") $SystemdService
                 sudo cp (Join-Path $ConfigPath "linux.timer") $SystemdTimer
                 sudo systemctl daemon-reload
-                sudo systemctl enable scheduled_shutdown_restart.timer
-                sudo systemctl start scheduled_shutdown_restart.timer
+                sudo systemctl enable morgana.timer
+                sudo systemctl start morgana.timer
             }
             elseif ($Action -eq "uninstall") {
-                sudo systemctl stop scheduled_shutdown_restart.timer
-                sudo systemctl disable scheduled_shutdown_restart.timer
+                sudo systemctl stop morgana.timer
+                sudo systemctl disable morgana.timer
             }
         }
     }

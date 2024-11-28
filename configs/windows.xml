@@ -12,7 +12,7 @@
         <Exec>
             <Command>pwsh.exe</Command>
             <Arguments>-File "C:\Program
-                Files\ScheduledShutdownRestart\ScheduledShutdownRestart.ps1" -Action shutdown</Arguments>
+                Files\Morgana\morgana.ps1" -Action shutdown</Arguments>
         </Exec>
     </Actions>
 </Task>

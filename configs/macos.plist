@@ -3,12 +3,12 @@
 <plist version="1.0">
     <dict>
         <key>Label</key>
-        <string>com.user.scheduledshutdownrestart</string>
+        <string>com.user.morgana</string>
         <key>ProgramArguments</key>
         <array>
             <string>/usr/local/bin/pwsh</string>
             <string>-File</string>
-            <string>/usr/local/bin/ScheduledShutdownRestart.ps1</string>
+            <string>/usr/local/bin/morgana.ps1</string>
             <string>-Action</string>
             <string>shutdown</string>
         </array>
@@ -22,8 +22,8 @@
         <key>RunAtLoad</key>
         <false />
         <key>StandardOutPath</key>
-        <string>/tmp/scheduledshutdownrestart.out</string>
+        <string>/tmp/morgana.out</string>
         <key>StandardErrorPath</key>
-        <string>/tmp/scheduledshutdownrestart.err</string>
+        <string>/tmp/morgana.err</string>
     </dict>
 </plist>

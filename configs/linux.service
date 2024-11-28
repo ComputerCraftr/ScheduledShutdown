@@ -2,4 +2,4 @@
 Description=Scheduled Shutdown/Restart Service
 
 [Service]
-ExecStart=/usr/bin/pwsh /usr/local/bin/ScheduledShutdownRestart.ps1 -Action shutdown
+ExecStart=/usr/bin/pwsh /usr/local/bin/morgana.ps1 -Action shutdown
