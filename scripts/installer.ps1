@@ -139,11 +139,11 @@ function InstallScript {
         }
         "macOS" {
             sudo cp (Join-Path $ScriptRoot "morgana.ps1") $ScriptPath
-            sudo chmod +x $ScriptPath
+            sudo chmod 755 $ScriptPath
         }
         "Linux" {
             sudo cp (Join-Path $ScriptRoot "morgana.ps1") $ScriptPath
-            sudo chmod +x $ScriptPath
+            sudo chmod 755 $ScriptPath
         }
     }
 }
@@ -306,6 +306,7 @@ function ManageTask {
                     sudo launchctl unload $DaemonPath
                 }
                 sudo cp $ConfigPath $DaemonPath
+                sudo chmod 644 $DaemonPath
                 sudo launchctl load $DaemonPath
             }
             elseif ($Action -eq "uninstall") {
@@ -315,7 +316,9 @@ function ManageTask {
         "Linux" {
             if ($Action -eq "install" -or $Action -eq "reinstall") {
                 sudo cp (Join-Path $ConfigPath "linux.service") $SystemdService
+                sudo chmod 644 $SystemdService
                 sudo cp (Join-Path $ConfigPath "linux.timer") $SystemdTimer
+                sudo chmod 644 $SystemdTimer
                 sudo systemctl daemon-reload
                 sudo systemctl enable morgana.timer
                 sudo systemctl start morgana.timer
