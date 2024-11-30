@@ -1,18 +1,37 @@
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+<?xml version="1.0" encoding="UTF-8"?>
+<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+    <RegistrationInfo>
+        <Date>2024-11-24T22:00:00</Date>
+        <Author>CompCraftr</Author>
+        <Version>1.0.0</Version>
+        <Description>Scheduled shutdown using Morgana script.</Description>
+    </RegistrationInfo>
     <Triggers>
         <CalendarTrigger>
             <StartBoundary>2024-11-24T22:00:00</StartBoundary>
-            <Enabled>true</Enabled>
             <ScheduleByDay>
                 <DaysInterval>1</DaysInterval>
             </ScheduleByDay>
         </CalendarTrigger>
     </Triggers>
-    <Actions Context="Author">
+    <Principals>
+        <Principal>
+            <UserId>SYSTEM</UserId>
+            <LogonType>InteractiveToken</LogonType>
+            <RunLevel>HighestAvailable</RunLevel>
+        </Principal>
+    </Principals>
+    <Settings>
+        <Enabled>true</Enabled>
+        <AllowStartOnDemand>true</AllowStartOnDemand>
+        <AllowHardTerminate>true</AllowHardTerminate>
+        <StartWhenAvailable>false</StartWhenAvailable>
+        <MultipleInstances>IgnoreNew</MultipleInstances>
+    </Settings>
+    <Actions>
         <Exec>
             <Command>pwsh.exe</Command>
-            <Arguments>-File "C:\Program
-                Files\Morgana\morgana.ps1" -Action shutdown</Arguments>
+            <Arguments>-NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\Morgana\morgana.ps1" -Action shutdown</Arguments>
         </Exec>
     </Actions>
 </Task>
