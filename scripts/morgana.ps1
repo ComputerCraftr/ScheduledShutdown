@@ -3,7 +3,7 @@ Param (
     [string]$Action = "shutdown"  # Default action
 )
 
-# Enable strict mode for safer scripting
+# Enable strict mode and configure error handling
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
@@ -12,7 +12,7 @@ $Action = $Action.ToLower()
 
 # Ensure script is running on PowerShell Core
 if ($PSVersionTable.PSEdition -ne "Core") {
-    Write-Output "This script requires PowerShell Core to run on all platforms (Windows, macOS, Linux)."
+    Write-Host "This script requires PowerShell Core to run on all platforms (Windows, macOS, Linux)."
     exit 1
 }
 
@@ -27,8 +27,7 @@ try {
                 sudo shutdown -h now
             }
             else {
-                Write-Output "Platform not supported. This script only works on Windows, macOS, or Linux."
-                exit 1
+                throw "Platform not supported. This script only works on Windows, macOS, or Linux."
             }
         }
         "restart" {
@@ -39,17 +38,16 @@ try {
                 sudo shutdown -r now
             }
             else {
-                Write-Output "Platform not supported. This script only works on Windows, macOS, or Linux."
-                exit 1
+                throw "Platform not supported. This script only works on Windows, macOS, or Linux."
             }
         }
         default {
-            Write-Output "Invalid action. Use 'shutdown' or 'restart'."
-            exit 1
+            throw "Invalid action. Use 'shutdown' or 'restart'."
         }
     }
 }
 catch {
-    Write-Error "An error occurred: $_"
+    # Show only the error message, not the technical details
+    Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
