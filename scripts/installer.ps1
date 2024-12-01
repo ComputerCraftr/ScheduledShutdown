@@ -109,52 +109,61 @@ function Test-Parameters {
 # Resolve platform-specific paths
 function Resolve-Paths {
     try {
+        # Validate the script name
+        if ([string]::IsNullOrWhiteSpace($ScriptName) -or $ScriptName -notmatch "^[a-z0-9_-]+$") {
+            throw "Invalid script name. It must not be empty or null, contain spaces, and only include lowercase letters, numbers, underscores, or hyphens (e.g., 'morgana')."
+        }
+
         Write-Host "Resolving paths for platform-specific configurations..."
 
         # Determine script root path
         $ScriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Resolve-Path "." }
 
+        # Define common values
+        $BaseName = $ScriptName
+        $BaseNameUpper = $BaseName.Substring(0, 1).ToUpper() + $BaseName.Substring(1)
+        $ScriptFileName = "$BaseName.ps1"
+
         # Initialize platform-specific variables
-        switch ($Platform) {
+        $Paths = switch ($Platform) {
             "Windows" {
-                $ScriptPath = "C:\Program Files\Morgana\morgana.ps1"
-                $ConfigPath = Join-Path $ScriptRoot "..\configs\windows.xml"
-                $TaskName = "Morgana"
-                $DaemonPath = $null
-                $SystemdService = $null
-                $SystemdTimer = $null
+                @{
+                    ScriptRoot     = $ScriptRoot
+                    ScriptPath     = "C:\Program Files\$BaseNameUpper\$ScriptFileName"
+                    ConfigPath     = Join-Path $ScriptRoot "..\configs\windows.xml"
+                    TaskName       = $BaseNameUpper
+                    DaemonPath     = $null
+                    SystemdService = $null
+                    SystemdTimer   = $null
+                }
             }
             "macOS" {
-                $ScriptPath = "/usr/local/bin/morgana.ps1"
-                $ConfigPath = Join-Path $ScriptRoot "..\configs\macos.plist"
-                $DaemonPath = "/Library/LaunchDaemons/com.user.morgana.plist"
-                $TaskName = $null
-                $SystemdService = $null
-                $SystemdTimer = $null
+                @{
+                    ScriptRoot     = $ScriptRoot
+                    ScriptPath     = "/usr/local/bin/$ScriptFileName"
+                    ConfigPath     = Join-Path $ScriptRoot "..\configs\macos.plist"
+                    DaemonPath     = "/Library/LaunchDaemons/com.user.$BaseName.plist"
+                    TaskName       = $null
+                    SystemdService = $null
+                    SystemdTimer   = $null
+                }
             }
             "Linux" {
-                $ScriptPath = "/usr/local/bin/morgana.ps1"
-                $ConfigPath = Join-Path $ScriptRoot "..\configs"
-                $SystemdService = "/etc/systemd/system/morgana.service"
-                $SystemdTimer = "/etc/systemd/system/morgana.timer"
-                $TaskName = $null
-                $DaemonPath = $null
+                @{
+                    ScriptRoot     = $ScriptRoot
+                    ScriptPath     = "/usr/local/bin/$ScriptFileName"
+                    ConfigPath     = Join-Path $ScriptRoot "..\configs"
+                    SystemdService = "/etc/systemd/system/$BaseName.service"
+                    SystemdTimer   = "/etc/systemd/system/$BaseName.timer"
+                    TaskName       = $null
+                    DaemonPath     = $null
+                }
             }
-            default {
-                throw "Unsupported platform."
-            }
+            default { throw "Unsupported platform." }
         }
 
         # Return the resolved paths as a Hashtable
-        return @{
-            ScriptRoot     = $ScriptRoot
-            ScriptPath     = $ScriptPath
-            ConfigPath     = $ConfigPath
-            TaskName       = $TaskName
-            DaemonPath     = $DaemonPath
-            SystemdService = $SystemdService
-            SystemdTimer   = $SystemdTimer
-        }
+        return $Paths
     }
     catch {
         throw "Failed to resolve paths: $_"
@@ -164,55 +173,113 @@ function Resolve-Paths {
 # Install the script to the appropriate location
 function Install-Script {
     try {
+        # Validate the script name
+        if ([string]::IsNullOrWhiteSpace($ScriptName) -or $ScriptName -notmatch "^[a-z0-9_-]+$") {
+            throw "Invalid script name. It must not be empty or null, contain spaces, and only include lowercase letters, numbers, underscores, or hyphens (e.g., 'morgana')."
+        }
+
+        # Determine script file and destination path
+        $ScriptFileName = "$ScriptName.ps1"
+        $SourcePath = Join-Path $ScriptRoot $ScriptFileName
+        if (-not (Test-Path $SourcePath)) {
+            throw "Source script not found: $SourcePath"
+        }
+
         Write-Host "Installing script to $ScriptPath..."
+
+        # Installation logic
         switch ($Platform) {
             "Windows" {
+                # Create the target directory if it doesn't exist
                 $InstallPath = Split-Path -Parent $ScriptPath
                 if (-not (Test-Path $InstallPath)) {
                     Write-Host "Creating directory: $InstallPath"
                     New-Item -ItemType Directory -Path $InstallPath -Force
-                    if (-not (Test-Path $InstallPath)) {
-                        throw "Failed to create directory: $InstallPath"
-                    }
                 }
-                $SourcePath = Join-Path $ScriptRoot "morgana.ps1"
-                if (-not (Test-Path $SourcePath)) {
-                    throw "Source script not found: $SourcePath"
-                }
+
+                # Copy the script
                 Copy-Item -Path $SourcePath -Destination $ScriptPath -Force
-                if (-not (Test-Path $ScriptPath)) {
-                    throw "Failed to copy script to: $ScriptPath"
-                }
+
+                # Resolve SIDs to localized group names
+                $adminSID = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-544")
+                $adminGroup = $adminSID.Translate([System.Security.Principal.NTAccount]).Value
+
+                $userSID = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-545")
+                $userGroup = $userSID.Translate([System.Security.Principal.NTAccount]).Value
+
+                # Set ownership to Administrators
                 $acl = Get-Acl $ScriptPath
-                $permission = New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators", "FullControl", "Allow")
-                $acl.SetAccessRule($permission)
+                $acl.SetOwner([System.Security.Principal.NTAccount]$adminGroup)
                 Set-Acl -Path $ScriptPath -AclObject $acl
+
+                # Define permissions
+                $permissions = @(
+                    New-Object System.Security.AccessControl.FileSystemAccessRule($adminGroup, "FullControl", "Allow"),
+                    New-Object System.Security.AccessControl.FileSystemAccessRule($userGroup, "ReadAndExecute", "Allow")
+                )
+
+                foreach ($permission in $permissions) {
+                    $acl.AddAccessRule($permission)
+                }
+                Set-Acl -Path $ScriptPath -AclObject $acl
+
                 Write-Host "Set permissions for: $ScriptPath"
             }
             "macOS" {
-                $SourcePath = Join-Path $ScriptRoot "morgana.ps1"
-                if (-not (Test-Path $SourcePath)) {
-                    throw "Source script not found: $SourcePath"
-                }
-                sudo cp $SourcePath $ScriptPath
-                if ($LASTEXITCODE -ne 0) { throw "Failed to copy script to: $ScriptPath" }
-                sudo chmod 755 $ScriptPath
+                # Copy the script
+                Copy-Item -Path $SourcePath -Destination $ScriptPath -Force
+                if (-not (Test-Path $ScriptPath)) { throw "Failed to copy script to: $ScriptPath" }
+
+                # Set ownership and permissions
+                & chown root $ScriptPath
+                if ($LASTEXITCODE -ne 0) { throw "Failed to set owner for: $ScriptPath" }
+                & chmod 755 $ScriptPath
                 if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions for: $ScriptPath" }
+
+                # Copy and configure daemon
+                Copy-Item -Path $ConfigPath -Destination $DaemonPath -Force
+                if (-not (Test-Path $DaemonPath)) { throw "Failed to copy daemon to: $DaemonPath" }
+                & chown root $DaemonPath
+                if ($LASTEXITCODE -ne 0) { throw "Failed to set owner for: $DaemonPath" }
+                & chmod 644 $DaemonPath
+                if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions for: $DaemonPath" }
             }
             "Linux" {
-                $SourcePath = Join-Path $ScriptRoot "morgana.ps1"
-                if (-not (Test-Path $SourcePath)) {
-                    throw "Source script not found: $SourcePath"
-                }
-                sudo cp $SourcePath $ScriptPath
-                if ($LASTEXITCODE -ne 0) { throw "Failed to copy script to: $ScriptPath" }
-                sudo chmod 755 $ScriptPath
+                # Copy the script
+                Copy-Item -Path $SourcePath -Destination $ScriptPath -Force
+                if (-not (Test-Path $ScriptPath)) { throw "Failed to copy script to: $ScriptPath" }
+
+                # Set ownership and permissions
+                & chown root $ScriptPath
+                if ($LASTEXITCODE -ne 0) { throw "Failed to set owner for: $ScriptPath" }
+                & chmod 755 $ScriptPath
                 if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions for: $ScriptPath" }
+
+                # Copy and configure systemd service and timer
+                Copy-Item -Path (Join-Path $ConfigPath "linux.service") -Destination $SystemdService -Force
+                if (-not (Test-Path $SystemdService)) { throw "Failed to copy service to: $SystemdService" }
+                & chown root $SystemdService
+                if ($LASTEXITCODE -ne 0) { throw "Failed to set owner for: $SystemdService" }
+                & chmod 644 $SystemdService
+                if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions for: $SystemdService" }
+
+                Copy-Item -Path (Join-Path $ConfigPath "linux.timer") -Destination $SystemdTimer -Force
+                if (-not (Test-Path $SystemdTimer)) { throw "Failed to copy timer to: $SystemdTimer" }
+                & chown root $SystemdTimer
+                if ($LASTEXITCODE -ne 0) { throw "Failed to set owner for: $SystemdTimer" }
+                & chmod 644 $SystemdTimer
+                if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions for: $SystemdTimer" }
+
+                # Reload systemd daemon
+                & systemctl daemon-reload
+                if ($LASTEXITCODE -ne 0) { throw "Failed to reload systemd daemon" }
             }
             default {
                 throw "Unsupported platform."
             }
         }
+
+        Write-Host "Script installed successfully to $ScriptPath."
     }
     catch {
         throw "Failed to install script: $_"
@@ -220,193 +287,171 @@ function Install-Script {
 }
 
 function Update-Config {
-    try {
-        Write-Host "Updating configuration files for $Platform..."
+    Write-Host "Updating configuration files for $Platform..."
 
-        switch ($Platform) {
-            "Windows" {
-                try {
-                    Write-Host "Updating Windows Task Scheduler XML configuration..."
+    switch ($Platform) {
+        "Windows" {
+            try {
+                Write-Host "Updating Windows Task Scheduler XML configuration..."
 
-                    # Load the XML document
-                    $TaskXml = New-Object System.Xml.XmlDocument
-                    $TaskXml.Load($ConfigPath)
+                # Load the XML document
+                $TaskXml = New-Object System.Xml.XmlDocument
+                $TaskXml.Load($ConfigPath)
 
-                    # Define namespace manager
-                    $NamespaceManager = New-Object System.Xml.XmlNamespaceManager($TaskXml.NameTable)
-                    $NamespaceManager.AddNamespace("task", "http://schemas.microsoft.com/windows/2004/02/mit/task")
+                # Define namespace manager
+                $NamespaceManager = New-Object System.Xml.XmlNamespaceManager($TaskXml.NameTable)
+                $NamespaceManager.AddNamespace("task", "http://schemas.microsoft.com/windows/2004/02/mit/task")
 
-                    # Update StartBoundary for scheduling
-                    $StartBoundaryNode = $TaskXml.SelectSingleNode("//task:StartBoundary", $NamespaceManager)
-                    if (-not $StartBoundaryNode) {
-                        throw "StartBoundary node not found in XML."
-                    }
-                    $StartBoundaryNode.InnerText = "2024-11-24T$($Time):00"
-                    Write-Host "Updated StartBoundary: $($StartBoundaryNode.InnerText)"
-
-                    # Update the -Action parameter in Arguments
-                    $ArgumentsNode = $TaskXml.SelectSingleNode("//task:Actions/task:Exec/task:Arguments", $NamespaceManager)
-                    if (-not $ArgumentsNode) {
-                        throw "Arguments node not found in XML."
-                    }
-                    $ArgumentsNode.InnerText = $ArgumentsNode.InnerText -replace "-Action \S+", "-Action $ScheduleType"
-                    Write-Host "Updated Arguments: $($ArgumentsNode.InnerText)"
-
-                    # Save updated XML with correct encoding
-                    $Settings = New-Object System.Xml.XmlWriterSettings
-                    $Settings.Indent = $true
-                    $Settings.OmitXmlDeclaration = $false
-                    $Settings.NewLineChars = "`n"
-                    $Settings.Encoding = [System.Text.Encoding]::Unicode  # Ensure UTF-16 LE with BOM
-                    $Settings.CloseOutput = $true
-
-                    $XmlWriter = [System.Xml.XmlWriter]::Create($ConfigPath, $Settings)
-                    $TaskXml.WriteTo($XmlWriter)
-                    $XmlWriter.Close()
-
-                    Write-Host "Windows Task Scheduler configuration updated successfully."
+                # Update StartBoundary for scheduling
+                $StartBoundaryNode = $TaskXml.SelectSingleNode("//task:StartBoundary", $NamespaceManager)
+                if (-not $StartBoundaryNode) {
+                    throw "StartBoundary node not found in XML."
                 }
-                catch {
-                    throw "Failed to update Windows Task Scheduler configuration: $_"
+                $StartBoundaryNode.InnerText = "2024-11-24T$($Time):00"
+                Write-Host "Updated StartBoundary: $($StartBoundaryNode.InnerText)"
+
+                # Update the -Action parameter in Arguments
+                $ArgumentsNode = $TaskXml.SelectSingleNode("//task:Actions/task:Exec/task:Arguments", $NamespaceManager)
+                if (-not $ArgumentsNode) {
+                    throw "Arguments node not found in XML."
                 }
+                $ArgumentsNode.InnerText = $ArgumentsNode.InnerText -replace "-Action \S+", "-Action $ScheduleType"
+                Write-Host "Updated Arguments: $($ArgumentsNode.InnerText)"
+
+                # Save updated XML with correct encoding
+                $Settings = New-Object System.Xml.XmlWriterSettings
+                $Settings.Indent = $true
+                $Settings.OmitXmlDeclaration = $false
+                $Settings.NewLineChars = "`n"
+                $Settings.Encoding = [System.Text.Encoding]::Unicode  # Ensure UTF-16 LE with BOM
+                $Settings.CloseOutput = $true
+
+                $XmlWriter = [System.Xml.XmlWriter]::Create($ConfigPath, $Settings)
+                $TaskXml.WriteTo($XmlWriter)
+                $XmlWriter.Close()
+
+                Write-Host "Windows Task Scheduler configuration updated successfully."
             }
-            "macOS" {
-                try {
-                    Write-Host "Updating macOS plist configuration..."
-                    $Hour, $Minute = $Time.Split(":")
-                    $PlistXml = New-Object System.Xml.XmlDocument
-                    $PlistXml.Load($ConfigPath)
-
-                    # Update ProgramArguments for the -Action parameter
-                    $ProgramArguments = $PlistXml.SelectNodes("//key[normalize-space(text())='ProgramArguments']")
-                    if ($ProgramArguments.Count -gt 0) {
-                        $ArgumentsArray = $ProgramArguments[0].NextSibling
-                        foreach ($Item in $ArgumentsArray.ChildNodes) {
-                            if ($Item.InnerText -eq "-Action") {
-                                $Item.NextSibling.InnerText = $ScheduleType
-                                Write-Host "Updated ProgramArguments: $ScheduleType"
-                            }
-                        }
-                    }
-
-                    # Update StartCalendarInterval
-                    $Keys = $PlistXml.SelectNodes("//key[normalize-space(text())='StartCalendarInterval']")
-                    if ($Keys.Count -gt 0) {
-                        $StartCalendarDict = $Keys[0].NextSibling
-                        foreach ($Key in $StartCalendarDict.ChildNodes) {
-                            if ($Key.InnerText -eq "Hour") {
-                                $Key.NextSibling.InnerText = $Hour
-                                Write-Host "Updated Hour: $Hour"
-                            }
-                            elseif ($Key.InnerText -eq "Minute") {
-                                $Key.NextSibling.InnerText = $Minute
-                                Write-Host "Updated Minute: $Minute"
-                            }
-                        }
-                    }
-
-                    # Save plist changes with correct encoding
-                    $Settings = New-Object System.Xml.XmlWriterSettings
-                    $Settings.Indent = $true
-                    $Settings.OmitXmlDeclaration = $false
-                    $Settings.NewLineChars = "`n"
-                    $Settings.Encoding = [System.Text.Encoding]::Unicode  # Ensure UTF-8 with BOM
-                    $Settings.CloseOutput = $true
-
-                    $XmlWriter = [System.Xml.XmlWriter]::Create($ConfigPath, $Settings)
-                    $PlistXml.WriteTo($XmlWriter)
-                    $XmlWriter.Close()
-
-                    # Remove invalid brackets in plist (if any)
-                    $(Get-Content $ConfigPath) `
-                        -replace '\[\]', '' |
-                    Set-Content $ConfigPath
-
-                    Write-Host "macOS plist configuration updated successfully."
-                }
-                catch {
-                    throw "Failed to update macOS plist configuration: $_"
-                }
-            }
-            "Linux" {
-                try {
-                    Write-Host "Updating Linux systemd service and timer files..."
-                    $ServicePath = Join-Path $ConfigPath "linux.service"
-                    $TimerPath = Join-Path $ConfigPath "linux.timer"
-
-                    # Update systemd service file
-                    $(Get-Content $ServicePath) `
-                        -replace "ExecStart=.*", "ExecStart=/usr/bin/pwsh $ScriptPath -Action $ScheduleType" |
-                    Set-Content $ServicePath
-                    Write-Host "Updated systemd service ExecStart."
-
-                    # Update systemd timer file
-                    $(Get-Content $TimerPath) `
-                        -replace "OnCalendar=.*", "OnCalendar=*-*-* $($Time):00" |
-                    Set-Content $TimerPath
-                    Write-Host "Updated systemd timer OnCalendar."
-
-                    Write-Host "Linux systemd service and timer files updated successfully."
-                }
-                catch {
-                    throw "Failed to update Linux systemd configuration files: $_"
-                }
-            }
-            default {
-                throw "Unsupported platform for configuration updates."
+            catch {
+                throw "Failed to update Windows Task Scheduler configuration: $_"
             }
         }
-    }
-    catch {
-        throw "An error occurred while updating platform-specific configuration files: $_"
+        "macOS" {
+            try {
+                Write-Host "Updating macOS plist configuration..."
+                $Hour, $Minute = $Time.Split(":")
+                $PlistXml = New-Object System.Xml.XmlDocument
+                $PlistXml.Load($ConfigPath)
+
+                # Update ProgramArguments for the -Action parameter
+                $ProgramArguments = $PlistXml.SelectNodes("//key[normalize-space(text())='ProgramArguments']")
+                if ($ProgramArguments.Count -gt 0) {
+                    $ArgumentsArray = $ProgramArguments[0].NextSibling
+                    foreach ($Item in $ArgumentsArray.ChildNodes) {
+                        if ($Item.InnerText -eq "-Action") {
+                            $Item.NextSibling.InnerText = $ScheduleType
+                            Write-Host "Updated ProgramArguments: $ScheduleType"
+                        }
+                    }
+                }
+
+                # Update StartCalendarInterval
+                $Keys = $PlistXml.SelectNodes("//key[normalize-space(text())='StartCalendarInterval']")
+                if ($Keys.Count -gt 0) {
+                    $StartCalendarDict = $Keys[0].NextSibling
+                    foreach ($Key in $StartCalendarDict.ChildNodes) {
+                        if ($Key.InnerText -eq "Hour") {
+                            $Key.NextSibling.InnerText = $Hour
+                            Write-Host "Updated Hour: $Hour"
+                        }
+                        elseif ($Key.InnerText -eq "Minute") {
+                            $Key.NextSibling.InnerText = $Minute
+                            Write-Host "Updated Minute: $Minute"
+                        }
+                    }
+                }
+
+                # Save plist changes with correct encoding
+                $Settings = New-Object System.Xml.XmlWriterSettings
+                $Settings.Indent = $true
+                $Settings.OmitXmlDeclaration = $false
+                $Settings.NewLineChars = "`n"
+                $Settings.Encoding = [System.Text.Encoding]::Unicode  # Ensure UTF-8 with BOM
+                $Settings.CloseOutput = $true
+
+                $XmlWriter = [System.Xml.XmlWriter]::Create($ConfigPath, $Settings)
+                $PlistXml.WriteTo($XmlWriter)
+                $XmlWriter.Close()
+
+                # Remove invalid brackets in plist (if any)
+                $(Get-Content $ConfigPath) `
+                    -replace '\[\]', '' |
+                Set-Content $ConfigPath
+
+                Write-Host "macOS plist configuration updated successfully."
+            }
+            catch {
+                throw "Failed to update macOS plist configuration: $_"
+            }
+        }
+        "Linux" {
+            try {
+                Write-Host "Updating Linux systemd service and timer files..."
+                $ServicePath = Join-Path $ConfigPath "linux.service"
+                $TimerPath = Join-Path $ConfigPath "linux.timer"
+
+                # Update systemd service file
+                $(Get-Content $ServicePath) `
+                    -replace "ExecStart=.*", "ExecStart=/usr/bin/pwsh $ScriptPath -Action $ScheduleType" |
+                Set-Content $ServicePath
+                Write-Host "Updated systemd service ExecStart."
+
+                # Update systemd timer file
+                $(Get-Content $TimerPath) `
+                    -replace "OnCalendar=.*", "OnCalendar=*-*-* $($Time):00" |
+                Set-Content $TimerPath
+                Write-Host "Updated systemd timer OnCalendar."
+
+                Write-Host "Linux systemd service and timer files updated successfully."
+            }
+            catch {
+                throw "Failed to update Linux systemd configuration files: $_"
+            }
+        }
+        default {
+            throw "Unsupported platform for configuration updates."
+        }
     }
 }
 
 # Clean up files during uninstallation
-function Remove-Files {
+function Remove-Script {
     try {
         Write-Host "Cleaning up files..."
+
+        Remove-Item -Path $ScriptPath -Force
+
         switch ($Platform) {
             "Windows" {
                 $InstallPath = Split-Path -Parent $ScriptPath
-                if (Test-Path $ScriptPath) {
-                    Remove-Item $ScriptPath -Force
-                    if (Test-Path $ScriptPath) { throw "Failed to remove script: $ScriptPath" }
+                if ((Get-ChildItem -Path $InstallPath -Recurse | Measure-Object).Count -eq 0) {
+                    Remove-Item -Path $InstallPath -Force
                 }
-                if (Test-Path $InstallPath) {
-                    if ((Get-ChildItem -Path $InstallPath -Recurse | Measure-Object).Count -eq 0) {
-                        Remove-Item $InstallPath -Force
-                        if (Test-Path $InstallPath) { throw "Failed to remove directory: $InstallPath" }
-                    }
-                    else {
-                        Write-Warning "Directory is not empty: $InstallPath"
-                    }
+                else {
+                    Write-Warning "Directory is not empty: $InstallPath"
                 }
             }
             "macOS" {
-                if (Test-Path $ScriptPath) {
-                    sudo rm $ScriptPath
-                    if ($LASTEXITCODE -ne 0) { throw "Failed to remove script: $ScriptPath" }
-                }
-                if (Test-Path $DaemonPath) {
-                    sudo rm $DaemonPath
-                    if ($LASTEXITCODE -ne 0) { throw "Failed to remove daemon: $DaemonPath" }
-                }
+                Write-Host "Removing daemon..."
+                Remove-Item -Path $DaemonPath -Force
             }
             "Linux" {
-                if (Test-Path $ScriptPath) {
-                    sudo rm $ScriptPath
-                    if ($LASTEXITCODE -ne 0) { throw "Failed to remove script: $ScriptPath" }
-                }
-                if (Test-Path $SystemdService) {
-                    sudo rm $SystemdService
-                    if ($LASTEXITCODE -ne 0) { throw "Failed to remove service: $SystemdService" }
-                }
-                if (Test-Path $SystemdTimer) {
-                    sudo rm $SystemdTimer
-                    if ($LASTEXITCODE -ne 0) { throw "Failed to remove timer: $SystemdTimer" }
-                }
-                sudo systemctl daemon-reload
+                Write-Host "Removing service and timer files..."
+                Remove-Item -Path $SystemdService -Force
+                Remove-Item -Path $SystemdTimer -Force
+
+                Write-Host "Reloading systemd daemon..."
+                & systemctl daemon-reload
                 if ($LASTEXITCODE -ne 0) { throw "Failed to reload systemd daemon" }
             }
             default {
@@ -421,10 +466,16 @@ function Remove-Files {
 
 # Manage the task/service/daemon
 function Set-Task {
-    Param ([string]$Action)
-
     try {
-        Write-Host "$Action task/service/daemon for $Platform..."
+        # Validate the script name
+        if ([string]::IsNullOrWhiteSpace($ScriptName) -or $ScriptName -notmatch "^[a-z0-9_-]+$") {
+            throw "Invalid script name. It must not be empty or null, contain spaces, and only include lowercase letters, numbers, underscores, or hyphens (e.g., 'morgana')."
+        }
+
+        Write-Host "$($Action.Substring(0, 1).ToUpper() + $Action.Substring(1)) task/service/daemon for $Platform..."
+
+        # Define common values
+        $BaseName = $ScriptName
 
         switch ($Platform) {
             "Windows" {
@@ -448,68 +499,41 @@ function Set-Task {
                 if ($Action -eq "install" -or $Action -eq "reinstall") {
                     if ($Action -eq "reinstall") {
                         Write-Host "Unloading existing daemon..."
-                        sudo launchctl unload $DaemonPath
+                        & launchctl unload $DaemonPath
                         if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to unload daemon. It might not be loaded." }
                     }
-                    Write-Host "Installing and loading new daemon..."
-                    sudo cp $ConfigPath $DaemonPath
-                    if ($LASTEXITCODE -ne 0) { throw "Failed to copy daemon configuration to $DaemonPath" }
-                    sudo chmod 644 $DaemonPath
-                    if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions on $DaemonPath" }
-                    sudo launchctl load $DaemonPath
+                    Write-Host "Loading new daemon..."
+                    & launchctl load $DaemonPath
                     if ($LASTEXITCODE -ne 0) { throw "Failed to load daemon from $DaemonPath" }
                 }
                 elseif ($Action -eq "uninstall") {
-                    Write-Host "Unloading and removing daemon..."
-                    sudo launchctl unload $DaemonPath
+                    Write-Host "Unloading daemon..."
+                    & launchctl unload $DaemonPath
                     if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to unload daemon. It might not be loaded." }
-                    sudo rm $DaemonPath
-                    if ($LASTEXITCODE -ne 0) { throw "Failed to remove daemon file $DaemonPath" }
                 }
             }
             "Linux" {
                 if ($Action -eq "install" -or $Action -eq "reinstall") {
                     if ($Action -eq "reinstall") {
                         Write-Host "Stopping existing systemd timer..."
-                        sudo systemctl stop morgana.timer
+                        & systemctl stop "$BaseName.timer"
                         if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to stop existing timer. It might not be running." }
                         Write-Host "Disabling existing systemd timer..."
-                        sudo systemctl disable morgana.timer
+                        & systemctl disable "$BaseName.timer"
                         if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to disable existing timer. It might not be enabled." }
                     }
-                    Write-Host "Setting up systemd service and timer..."
-                    sudo cp (Join-Path $ConfigPath "linux.service") $SystemdService
-                    if ($LASTEXITCODE -ne 0) { throw "Failed to copy service file to $SystemdService" }
-                    sudo chmod 644 $SystemdService
-                    if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions on $SystemdService" }
-                    sudo cp (Join-Path $ConfigPath "linux.timer") $SystemdTimer
-                    if ($LASTEXITCODE -ne 0) { throw "Failed to copy timer file to $SystemdTimer" }
-                    sudo chmod 644 $SystemdTimer
-                    if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions on $SystemdTimer" }
-                    sudo systemctl daemon-reload
-                    if ($LASTEXITCODE -ne 0) { throw "Failed to reload systemd daemon" }
-                    sudo systemctl enable morgana.timer
+                    Write-Host "Setting up systemd timer..."
+                    & systemctl enable "$BaseName.timer"
                     if ($LASTEXITCODE -ne 0) { throw "Failed to enable systemd timer" }
-                    sudo systemctl start morgana.timer
+                    & systemctl start "$BaseName.timer"
                     if ($LASTEXITCODE -ne 0) { throw "Failed to start systemd timer" }
                 }
                 elseif ($Action -eq "uninstall") {
                     Write-Host "Stopping and disabling systemd timer..."
-                    sudo systemctl stop morgana.timer
+                    & systemctl stop "$BaseName.timer"
                     if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to stop systemd timer. It might not be running." }
-                    sudo systemctl disable morgana.timer
+                    & systemctl disable "$BaseName.timer"
                     if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to disable systemd timer. It might not be enabled." }
-                    Write-Host "Removing service and timer files..."
-                    if (Test-Path $SystemdService) {
-                        sudo rm $SystemdService
-                        if ($LASTEXITCODE -ne 0) { throw "Failed to remove service file $SystemdService" }
-                    }
-                    if (Test-Path $SystemdTimer) {
-                        sudo rm $SystemdTimer
-                        if ($LASTEXITCODE -ne 0) { throw "Failed to remove timer file $SystemdTimer" }
-                    }
-                    sudo systemctl daemon-reload
-                    if ($LASTEXITCODE -ne 0) { throw "Failed to reload systemd daemon" }
                 }
             }
             default {
@@ -524,6 +548,7 @@ function Set-Task {
 
 # Main logic
 try {
+    Set-Variable -Name "ScriptName" -Value "morgana" -Option Constant
     Test-Parameters
 
     Set-Variable -Name "Platform" -Value $(Get-Platform) -Option Constant
@@ -545,13 +570,13 @@ try {
     }
 
     if ($Action -ne "uninstall") {
-        Install-Script
         Update-Config
-        Set-Task -Action $Action
+        Install-Script
+        Set-Task
     }
     else {
-        Set-Task -Action $Action
-        Remove-Files
+        Set-Task
+        Remove-Script
     }
 }
 catch {
