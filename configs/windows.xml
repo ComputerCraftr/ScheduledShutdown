@@ -15,7 +15,7 @@
         </CalendarTrigger>
     </Triggers>
     <Principals>
-        <Principal>
+        <Principal id="Author">
             <UserId>SYSTEM</UserId>
             <LogonType>InteractiveToken</LogonType>
             <RunLevel>HighestAvailable</RunLevel>
@@ -26,7 +26,9 @@
         <AllowStartOnDemand>true</AllowStartOnDemand>
         <AllowHardTerminate>true</AllowHardTerminate>
         <StartWhenAvailable>false</StartWhenAvailable>
-        <MultipleInstances>IgnoreNew</MultipleInstances>
+        <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+        <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+        <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     </Settings>
     <Actions>
         <Exec>
