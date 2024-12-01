@@ -168,16 +168,46 @@ function Install-Script {
         switch ($Platform) {
             "Windows" {
                 $InstallPath = Split-Path -Parent $ScriptPath
-                if (-not (Test-Path $InstallPath)) { New-Item -ItemType Directory -Path $InstallPath -Force }
-                Copy-Item (Join-Path $ScriptRoot "morgana.ps1") -Destination $ScriptPath -Force
+                if (-not (Test-Path $InstallPath)) {
+                    Write-Host "Creating directory: $InstallPath"
+                    New-Item -ItemType Directory -Path $InstallPath -Force
+                    if (-not (Test-Path $InstallPath)) {
+                        throw "Failed to create directory: $InstallPath"
+                    }
+                }
+                $SourcePath = Join-Path $ScriptRoot "morgana.ps1"
+                if (-not (Test-Path $SourcePath)) {
+                    throw "Source script not found: $SourcePath"
+                }
+                Copy-Item -Path $SourcePath -Destination $ScriptPath -Force
+                if (-not (Test-Path $ScriptPath)) {
+                    throw "Failed to copy script to: $ScriptPath"
+                }
+                $acl = Get-Acl $ScriptPath
+                $permission = New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators", "FullControl", "Allow")
+                $acl.SetAccessRule($permission)
+                Set-Acl -Path $ScriptPath -AclObject $acl
+                Write-Host "Set permissions for: $ScriptPath"
             }
             "macOS" {
-                sudo cp (Join-Path $ScriptRoot "morgana.ps1") $ScriptPath
+                $SourcePath = Join-Path $ScriptRoot "morgana.ps1"
+                if (-not (Test-Path $SourcePath)) {
+                    throw "Source script not found: $SourcePath"
+                }
+                sudo cp $SourcePath $ScriptPath
+                if ($LASTEXITCODE -ne 0) { throw "Failed to copy script to: $ScriptPath" }
                 sudo chmod 755 $ScriptPath
+                if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions for: $ScriptPath" }
             }
             "Linux" {
-                sudo cp (Join-Path $ScriptRoot "morgana.ps1") $ScriptPath
+                $SourcePath = Join-Path $ScriptRoot "morgana.ps1"
+                if (-not (Test-Path $SourcePath)) {
+                    throw "Source script not found: $SourcePath"
+                }
+                sudo cp $SourcePath $ScriptPath
+                if ($LASTEXITCODE -ne 0) { throw "Failed to copy script to: $ScriptPath" }
                 sudo chmod 755 $ScriptPath
+                if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions for: $ScriptPath" }
             }
             default {
                 throw "Unsupported platform."
@@ -197,28 +227,37 @@ function Update-Config {
             "Windows" {
                 try {
                     Write-Host "Updating Windows Task Scheduler XML configuration..."
+
+                    # Load the XML document
                     $TaskXml = New-Object System.Xml.XmlDocument
                     $TaskXml.Load($ConfigPath)
 
+                    # Define namespace manager
+                    $NamespaceManager = New-Object System.Xml.XmlNamespaceManager($TaskXml.NameTable)
+                    $NamespaceManager.AddNamespace("task", "http://schemas.microsoft.com/windows/2004/02/mit/task")
+
                     # Update StartBoundary for scheduling
-                    $StartBoundaryNode = $TaskXml.SelectSingleNode("//StartBoundary")
-                    if ($StartBoundaryNode) {
-                        $StartBoundaryNode.InnerText = "2024-11-24T$Time:00"
-                        Write-Host "Updated StartBoundary: $StartBoundaryNode.InnerText"
+                    $StartBoundaryNode = $TaskXml.SelectSingleNode("//task:StartBoundary", $NamespaceManager)
+                    if (-not $StartBoundaryNode) {
+                        throw "StartBoundary node not found in XML."
                     }
+                    $StartBoundaryNode.InnerText = "2024-11-24T$($Time):00"
+                    Write-Host "Updated StartBoundary: $($StartBoundaryNode.InnerText)"
 
                     # Update the -Action parameter in Arguments
-                    $ArgumentsNode = $TaskXml.SelectSingleNode("//Actions/Exec/Arguments")
-                    if ($ArgumentsNode) {
-                        $ArgumentsNode.InnerText = $ArgumentsNode.InnerText -replace "-Action \w+", "-Action $ScheduleType"
-                        Write-Host "Updated Arguments: $ArgumentsNode.InnerText"
+                    $ArgumentsNode = $TaskXml.SelectSingleNode("//task:Actions/task:Exec/task:Arguments", $NamespaceManager)
+                    if (-not $ArgumentsNode) {
+                        throw "Arguments node not found in XML."
                     }
+                    $ArgumentsNode.InnerText = $ArgumentsNode.InnerText -replace "-Action \S+", "-Action $ScheduleType"
+                    Write-Host "Updated Arguments: $($ArgumentsNode.InnerText)"
 
-                    # Save updated XML
+                    # Save updated XML with correct encoding
                     $Settings = New-Object System.Xml.XmlWriterSettings
                     $Settings.Indent = $true
                     $Settings.OmitXmlDeclaration = $false
                     $Settings.NewLineChars = "`n"
+                    $Settings.Encoding = [System.Text.Encoding]::Unicode  # Ensure UTF-16 LE with BOM
                     $Settings.CloseOutput = $true
 
                     $XmlWriter = [System.Xml.XmlWriter]::Create($ConfigPath, $Settings)
@@ -266,11 +305,12 @@ function Update-Config {
                         }
                     }
 
-                    # Save plist changes
+                    # Save plist changes with correct encoding
                     $Settings = New-Object System.Xml.XmlWriterSettings
                     $Settings.Indent = $true
                     $Settings.OmitXmlDeclaration = $false
                     $Settings.NewLineChars = "`n"
+                    $Settings.Encoding = [System.Text.Encoding]::Unicode  # Ensure UTF-8 with BOM
                     $Settings.CloseOutput = $true
 
                     $XmlWriter = [System.Xml.XmlWriter]::Create($ConfigPath, $Settings)
@@ -302,7 +342,7 @@ function Update-Config {
 
                     # Update systemd timer file
                     $(Get-Content $TimerPath) `
-                        -replace "OnCalendar=.*", "OnCalendar=*-*-* $Time:00" |
+                        -replace "OnCalendar=.*", "OnCalendar=*-*-* $($Time):00" |
                     Set-Content $TimerPath
                     Write-Host "Updated systemd timer OnCalendar."
 
@@ -328,18 +368,46 @@ function Remove-Files {
         Write-Host "Cleaning up files..."
         switch ($Platform) {
             "Windows" {
-                if (Test-Path $ScriptPath) { Remove-Item $ScriptPath -Force }
-                if (Test-Path $ConfigPath) { Remove-Item $ConfigPath -Force }
+                $InstallPath = Split-Path -Parent $ScriptPath
+                if (Test-Path $ScriptPath) {
+                    Remove-Item $ScriptPath -Force
+                    if (Test-Path $ScriptPath) { throw "Failed to remove script: $ScriptPath" }
+                }
+                if (Test-Path $InstallPath) {
+                    if ((Get-ChildItem -Path $InstallPath -Recurse | Measure-Object).Count -eq 0) {
+                        Remove-Item $InstallPath -Force
+                        if (Test-Path $InstallPath) { throw "Failed to remove directory: $InstallPath" }
+                    }
+                    else {
+                        Write-Warning "Directory is not empty: $InstallPath"
+                    }
+                }
             }
             "macOS" {
-                if (Test-Path $ScriptPath) { sudo rm $ScriptPath }
-                if (Test-Path $DaemonPath) { sudo rm $DaemonPath }
+                if (Test-Path $ScriptPath) {
+                    sudo rm $ScriptPath
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to remove script: $ScriptPath" }
+                }
+                if (Test-Path $DaemonPath) {
+                    sudo rm $DaemonPath
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to remove daemon: $DaemonPath" }
+                }
             }
             "Linux" {
-                if (Test-Path $ScriptPath) { sudo rm $ScriptPath }
-                if (Test-Path $SystemdService) { sudo rm $SystemdService }
-                if (Test-Path $SystemdTimer) { sudo rm $SystemdTimer }
+                if (Test-Path $ScriptPath) {
+                    sudo rm $ScriptPath
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to remove script: $ScriptPath" }
+                }
+                if (Test-Path $SystemdService) {
+                    sudo rm $SystemdService
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to remove service: $SystemdService" }
+                }
+                if (Test-Path $SystemdTimer) {
+                    sudo rm $SystemdTimer
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to remove timer: $SystemdTimer" }
+                }
                 sudo systemctl daemon-reload
+                if ($LASTEXITCODE -ne 0) { throw "Failed to reload systemd daemon" }
             }
             default {
                 throw "Unsupported platform."
@@ -364,13 +432,16 @@ function Set-Task {
                     if ($Action -eq "reinstall") {
                         Write-Host "Removing existing task..."
                         schtasks /Delete /TN $TaskName /F
+                        if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to delete task '$TaskName'. It might not exist." }
                     }
                     Write-Host "Creating new task..."
                     schtasks /Create /TN $TaskName /XML $ConfigPath /F
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to create task '$TaskName'. Check the XML configuration or Task Scheduler settings." }
                 }
                 elseif ($Action -eq "uninstall") {
                     Write-Host "Deleting task..."
                     schtasks /Delete /TN $TaskName /F
+                    if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to delete task '$TaskName'. It might not exist." }
                 }
             }
             "macOS" {
@@ -378,36 +449,67 @@ function Set-Task {
                     if ($Action -eq "reinstall") {
                         Write-Host "Unloading existing daemon..."
                         sudo launchctl unload $DaemonPath
+                        if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to unload daemon. It might not be loaded." }
                     }
                     Write-Host "Installing and loading new daemon..."
                     sudo cp $ConfigPath $DaemonPath
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to copy daemon configuration to $DaemonPath" }
                     sudo chmod 644 $DaemonPath
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions on $DaemonPath" }
                     sudo launchctl load $DaemonPath
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to load daemon from $DaemonPath" }
                 }
                 elseif ($Action -eq "uninstall") {
                     Write-Host "Unloading and removing daemon..."
                     sudo launchctl unload $DaemonPath
+                    if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to unload daemon. It might not be loaded." }
                     sudo rm $DaemonPath
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to remove daemon file $DaemonPath" }
                 }
             }
             "Linux" {
                 if ($Action -eq "install" -or $Action -eq "reinstall") {
+                    if ($Action -eq "reinstall") {
+                        Write-Host "Stopping existing systemd timer..."
+                        sudo systemctl stop morgana.timer
+                        if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to stop existing timer. It might not be running." }
+                        Write-Host "Disabling existing systemd timer..."
+                        sudo systemctl disable morgana.timer
+                        if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to disable existing timer. It might not be enabled." }
+                    }
                     Write-Host "Setting up systemd service and timer..."
                     sudo cp (Join-Path $ConfigPath "linux.service") $SystemdService
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to copy service file to $SystemdService" }
                     sudo chmod 644 $SystemdService
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions on $SystemdService" }
                     sudo cp (Join-Path $ConfigPath "linux.timer") $SystemdTimer
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to copy timer file to $SystemdTimer" }
                     sudo chmod 644 $SystemdTimer
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions on $SystemdTimer" }
                     sudo systemctl daemon-reload
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to reload systemd daemon" }
                     sudo systemctl enable morgana.timer
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to enable systemd timer" }
                     sudo systemctl start morgana.timer
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to start systemd timer" }
                 }
                 elseif ($Action -eq "uninstall") {
                     Write-Host "Stopping and disabling systemd timer..."
                     sudo systemctl stop morgana.timer
+                    if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to stop systemd timer. It might not be running." }
                     sudo systemctl disable morgana.timer
+                    if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to disable systemd timer. It might not be enabled." }
                     Write-Host "Removing service and timer files..."
-                    sudo rm $SystemdService $SystemdTimer
+                    if (Test-Path $SystemdService) {
+                        sudo rm $SystemdService
+                        if ($LASTEXITCODE -ne 0) { throw "Failed to remove service file $SystemdService" }
+                    }
+                    if (Test-Path $SystemdTimer) {
+                        sudo rm $SystemdTimer
+                        if ($LASTEXITCODE -ne 0) { throw "Failed to remove timer file $SystemdTimer" }
+                    }
                     sudo systemctl daemon-reload
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to reload systemd daemon" }
                 }
             }
             default {
