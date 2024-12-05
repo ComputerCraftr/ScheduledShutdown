@@ -24,7 +24,8 @@ try {
                 Stop-Computer -Force
             }
             elseif ($IsMacOS -or $IsLinux) {
-                sudo shutdown -h now
+                shutdown -h now
+                if ($LASTEXITCODE -ne 0) { throw "Failed to perform system $Action." }
             }
             else {
                 throw "Platform not supported. This script only works on Windows, macOS, or Linux."
@@ -35,7 +36,8 @@ try {
                 Restart-Computer -Force
             }
             elseif ($IsMacOS -or $IsLinux) {
-                sudo shutdown -r now
+                shutdown -r now
+                if ($LASTEXITCODE -ne 0) { throw "Failed to perform system $Action." }
             }
             else {
                 throw "Platform not supported. This script only works on Windows, macOS, or Linux."
