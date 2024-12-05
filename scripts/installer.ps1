@@ -212,15 +212,32 @@ function Install-Script {
                 $acl.SetOwner([System.Security.Principal.NTAccount]$adminGroup)
                 Set-Acl -Path $ScriptPath -AclObject $acl
 
-                # Define permissions
-                $permissions = @(
-                    New-Object System.Security.AccessControl.FileSystemAccessRule($adminGroup, "FullControl", "Allow"),
-                    New-Object System.Security.AccessControl.FileSystemAccessRule($userGroup, "ReadAndExecute", "Allow")
-                )
+                # Define permissions as a hashtable
+                $permissions = @{
+                    Admin = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                        $adminGroup,
+                        [System.Security.AccessControl.FileSystemRights]::FullControl,
+                        [System.Security.AccessControl.InheritanceFlags]::None,
+                        [System.Security.AccessControl.PropagationFlags]::None,
+                        [System.Security.AccessControl.AccessControlType]::Allow
+                    )
+                    User  = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                        $userGroup,
+                        [System.Security.AccessControl.FileSystemRights]::ReadAndExecute,
+                        [System.Security.AccessControl.InheritanceFlags]::None,
+                        [System.Security.AccessControl.PropagationFlags]::None,
+                        [System.Security.AccessControl.AccessControlType]::Allow
+                    )
+                }
 
-                foreach ($permission in $permissions) {
+                # Apply permissions
+                foreach ($key in $permissions.Keys) {
+                    $permission = $permissions[$key]
+                    Write-Host "Applying permission for $($key): $($permission.IdentityReference)"
                     $acl.AddAccessRule($permission)
                 }
+
+                # Apply the updated ACL to the file
                 Set-Acl -Path $ScriptPath -AclObject $acl
 
                 Write-Host "Set permissions for: $ScriptPath"
