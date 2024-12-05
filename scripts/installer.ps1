@@ -248,17 +248,17 @@ function Install-Script {
                 if (-not (Test-Path $ScriptPath)) { throw "Failed to copy script to: $ScriptPath" }
 
                 # Set ownership and permissions
-                & chown root $ScriptPath
+                chown root $ScriptPath
                 if ($LASTEXITCODE -ne 0) { throw "Failed to set owner for: $ScriptPath" }
-                & chmod 755 $ScriptPath
+                chmod 755 $ScriptPath
                 if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions for: $ScriptPath" }
 
                 # Copy and configure daemon
                 Copy-Item -Path $ConfigPath -Destination $DaemonPath -Force
                 if (-not (Test-Path $DaemonPath)) { throw "Failed to copy daemon to: $DaemonPath" }
-                & chown root $DaemonPath
+                chown root $DaemonPath
                 if ($LASTEXITCODE -ne 0) { throw "Failed to set owner for: $DaemonPath" }
-                & chmod 644 $DaemonPath
+                chmod 644 $DaemonPath
                 if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions for: $DaemonPath" }
             }
             "Linux" {
@@ -267,28 +267,28 @@ function Install-Script {
                 if (-not (Test-Path $ScriptPath)) { throw "Failed to copy script to: $ScriptPath" }
 
                 # Set ownership and permissions
-                & chown root $ScriptPath
+                chown root $ScriptPath
                 if ($LASTEXITCODE -ne 0) { throw "Failed to set owner for: $ScriptPath" }
-                & chmod 755 $ScriptPath
+                chmod 755 $ScriptPath
                 if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions for: $ScriptPath" }
 
                 # Copy and configure systemd service and timer
                 Copy-Item -Path (Join-Path $ConfigPath "linux.service") -Destination $SystemdService -Force
                 if (-not (Test-Path $SystemdService)) { throw "Failed to copy service to: $SystemdService" }
-                & chown root $SystemdService
+                chown root $SystemdService
                 if ($LASTEXITCODE -ne 0) { throw "Failed to set owner for: $SystemdService" }
-                & chmod 644 $SystemdService
+                chmod 644 $SystemdService
                 if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions for: $SystemdService" }
 
                 Copy-Item -Path (Join-Path $ConfigPath "linux.timer") -Destination $SystemdTimer -Force
                 if (-not (Test-Path $SystemdTimer)) { throw "Failed to copy timer to: $SystemdTimer" }
-                & chown root $SystemdTimer
+                chown root $SystemdTimer
                 if ($LASTEXITCODE -ne 0) { throw "Failed to set owner for: $SystemdTimer" }
-                & chmod 644 $SystemdTimer
+                chmod 644 $SystemdTimer
                 if ($LASTEXITCODE -ne 0) { throw "Failed to set permissions for: $SystemdTimer" }
 
                 # Reload systemd daemon
-                & systemctl daemon-reload
+                systemctl daemon-reload
                 if ($LASTEXITCODE -ne 0) { throw "Failed to reload systemd daemon" }
             }
             default {
@@ -468,7 +468,7 @@ function Remove-Script {
                 Remove-Item -Path $SystemdTimer -Force
 
                 Write-Host "Reloading systemd daemon..."
-                & systemctl daemon-reload
+                systemctl daemon-reload
                 if ($LASTEXITCODE -ne 0) { throw "Failed to reload systemd daemon" }
             }
             default {
@@ -516,16 +516,16 @@ function Set-Task {
                 if ($Action -eq "install" -or $Action -eq "reinstall") {
                     if ($Action -eq "reinstall") {
                         Write-Host "Unloading existing daemon..."
-                        & launchctl unload $DaemonPath
+                        launchctl unload $DaemonPath
                         if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to unload daemon. It might not be loaded." }
                     }
                     Write-Host "Loading new daemon..."
-                    & launchctl load $DaemonPath
+                    launchctl load $DaemonPath
                     if ($LASTEXITCODE -ne 0) { throw "Failed to load daemon from $DaemonPath" }
                 }
                 elseif ($Action -eq "uninstall") {
                     Write-Host "Unloading daemon..."
-                    & launchctl unload $DaemonPath
+                    launchctl unload $DaemonPath
                     if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to unload daemon. It might not be loaded." }
                 }
             }
@@ -533,23 +533,23 @@ function Set-Task {
                 if ($Action -eq "install" -or $Action -eq "reinstall") {
                     if ($Action -eq "reinstall") {
                         Write-Host "Stopping existing systemd timer..."
-                        & systemctl stop "$BaseName.timer"
+                        systemctl stop "$BaseName.timer"
                         if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to stop existing timer. It might not be running." }
                         Write-Host "Disabling existing systemd timer..."
-                        & systemctl disable "$BaseName.timer"
+                        systemctl disable "$BaseName.timer"
                         if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to disable existing timer. It might not be enabled." }
                     }
                     Write-Host "Setting up systemd timer..."
-                    & systemctl enable "$BaseName.timer"
+                    systemctl enable "$BaseName.timer"
                     if ($LASTEXITCODE -ne 0) { throw "Failed to enable systemd timer" }
-                    & systemctl start "$BaseName.timer"
+                    systemctl start "$BaseName.timer"
                     if ($LASTEXITCODE -ne 0) { throw "Failed to start systemd timer" }
                 }
                 elseif ($Action -eq "uninstall") {
                     Write-Host "Stopping and disabling systemd timer..."
-                    & systemctl stop "$BaseName.timer"
+                    systemctl stop "$BaseName.timer"
                     if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to stop systemd timer. It might not be running." }
-                    & systemctl disable "$BaseName.timer"
+                    systemctl disable "$BaseName.timer"
                     if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to disable systemd timer. It might not be enabled." }
                 }
             }
