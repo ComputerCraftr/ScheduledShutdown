@@ -100,6 +100,13 @@ function Test-Parameters {
             $ScheduleType = $null
             $Time = $null
         }
+
+        # Return updated parameters
+        return @{
+            ProgAction       = $Action
+            ProgScheduleType = $ScheduleType
+            ProgTime         = $Time
+        }
     }
     catch {
         throw "Parameter validation failed: $_"
@@ -324,7 +331,7 @@ function Update-Config {
                 if (-not $StartBoundaryNode) {
                     throw "StartBoundary node not found in XML."
                 }
-                $StartBoundaryNode.InnerText = "2024-11-24T$($Time):00"
+                $StartBoundaryNode.InnerText = "2024-11-24T$($ProgTime):00"
                 Write-Host "Updated StartBoundary: $($StartBoundaryNode.InnerText)"
 
                 # Update the -Action parameter in Arguments
@@ -332,7 +339,7 @@ function Update-Config {
                 if (-not $ArgumentsNode) {
                     throw "Arguments node not found in XML."
                 }
-                $ArgumentsNode.InnerText = $ArgumentsNode.InnerText -replace "-Action \S+", "-Action $ScheduleType"
+                $ArgumentsNode.InnerText = $ArgumentsNode.InnerText -replace "-Action \S+", "-Action $ProgScheduleType"
                 Write-Host "Updated Arguments: $($ArgumentsNode.InnerText)"
 
                 # Save updated XML with correct encoding
@@ -356,7 +363,7 @@ function Update-Config {
         "macOS" {
             try {
                 Write-Host "Updating macOS plist configuration..."
-                $Hour, $Minute = $Time.Split(":")
+                $Hour, $Minute = $ProgTime.Split(":")
                 $PlistXml = New-Object System.Xml.XmlDocument
                 $PlistXml.Load($ConfigPath)
 
@@ -366,8 +373,8 @@ function Update-Config {
                     $ArgumentsArray = $ProgramArguments[0].NextSibling
                     foreach ($Item in $ArgumentsArray.ChildNodes) {
                         if ($Item.InnerText -eq "-Action") {
-                            $Item.NextSibling.InnerText = $ScheduleType
-                            Write-Host "Updated ProgramArguments: $ScheduleType"
+                            $Item.NextSibling.InnerText = $ProgScheduleType
+                            Write-Host "Updated ProgramArguments: $ProgScheduleType"
                         }
                     }
                 }
@@ -419,13 +426,13 @@ function Update-Config {
 
                 # Update systemd service file
                 $(Get-Content $ServicePath) `
-                    -replace "ExecStart=.*", "ExecStart=/usr/bin/pwsh $ScriptPath -Action $ScheduleType" |
+                    -replace "ExecStart=.*", "ExecStart=/usr/bin/pwsh $ScriptPath -Action $ProgScheduleType" |
                 Set-Content $ServicePath
                 Write-Host "Updated systemd service ExecStart."
 
                 # Update systemd timer file
                 $(Get-Content $TimerPath) `
-                    -replace "OnCalendar=.*", "OnCalendar=*-*-* $($Time):00" |
+                    -replace "OnCalendar=.*", "OnCalendar=*-*-* $($ProgTime):00" |
                 Set-Content $TimerPath
                 Write-Host "Updated systemd timer OnCalendar."
 
@@ -489,15 +496,15 @@ function Set-Task {
             throw "Invalid script name. It must not be empty or null, contain spaces, and only include lowercase letters, numbers, underscores, or hyphens (e.g., 'morgana')."
         }
 
-        Write-Host "$($Action.Substring(0, 1).ToUpper() + $Action.Substring(1)) task/service/daemon for $Platform..."
+        Write-Host "$($ProgAction.Substring(0, 1).ToUpper() + $ProgAction.Substring(1)) task/service/daemon for $Platform..."
 
         # Define common values
         $BaseName = $ScriptName
 
         switch ($Platform) {
             "Windows" {
-                if ($Action -eq "install" -or $Action -eq "reinstall") {
-                    if ($Action -eq "reinstall") {
+                if ($ProgAction -eq "install" -or $ProgAction -eq "reinstall") {
+                    if ($ProgAction -eq "reinstall") {
                         Write-Host "Removing existing task..."
                         schtasks /Delete /TN $TaskName /F
                         if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to delete task '$TaskName'. It might not exist." }
@@ -506,15 +513,15 @@ function Set-Task {
                     schtasks /Create /TN $TaskName /XML $ConfigPath /F
                     if ($LASTEXITCODE -ne 0) { throw "Failed to create task '$TaskName'. Check the XML configuration or Task Scheduler settings." }
                 }
-                elseif ($Action -eq "uninstall") {
+                elseif ($ProgAction -eq "uninstall") {
                     Write-Host "Deleting task..."
                     schtasks /Delete /TN $TaskName /F
                     if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to delete task '$TaskName'. It might not exist." }
                 }
             }
             "macOS" {
-                if ($Action -eq "install" -or $Action -eq "reinstall") {
-                    if ($Action -eq "reinstall") {
+                if ($ProgAction -eq "install" -or $ProgAction -eq "reinstall") {
+                    if ($ProgAction -eq "reinstall") {
                         Write-Host "Unloading existing daemon..."
                         launchctl unload $DaemonPath
                         if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to unload daemon. It might not be loaded." }
@@ -523,15 +530,15 @@ function Set-Task {
                     launchctl load $DaemonPath
                     if ($LASTEXITCODE -ne 0) { throw "Failed to load daemon from $DaemonPath" }
                 }
-                elseif ($Action -eq "uninstall") {
+                elseif ($ProgAction -eq "uninstall") {
                     Write-Host "Unloading daemon..."
                     launchctl unload $DaemonPath
                     if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to unload daemon. It might not be loaded." }
                 }
             }
             "Linux" {
-                if ($Action -eq "install" -or $Action -eq "reinstall") {
-                    if ($Action -eq "reinstall") {
+                if ($ProgAction -eq "install" -or $ProgAction -eq "reinstall") {
+                    if ($ProgAction -eq "reinstall") {
                         Write-Host "Stopping existing systemd timer..."
                         systemctl stop "$BaseName.timer"
                         if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to stop existing timer. It might not be running." }
@@ -545,7 +552,7 @@ function Set-Task {
                     systemctl start "$BaseName.timer"
                     if ($LASTEXITCODE -ne 0) { throw "Failed to start systemd timer" }
                 }
-                elseif ($Action -eq "uninstall") {
+                elseif ($ProgAction -eq "uninstall") {
                     Write-Host "Stopping and disabling systemd timer..."
                     systemctl stop "$BaseName.timer"
                     if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to stop systemd timer. It might not be running." }
@@ -565,8 +572,16 @@ function Set-Task {
 
 # Main logic
 try {
+    # Set immutable script name
     Set-Variable -Name "ScriptName" -Value "morgana" -Option Constant
-    Test-Parameters
+
+    # Capture updated parameters
+    $UpdatedParameters = Test-Parameters
+
+    # Assign updated parameters to global variables
+    Set-Variable -Name "ProgAction" -Value $UpdatedParameters["ProgAction"] -Option Constant
+    Set-Variable -Name "ProgScheduleType" -Value $UpdatedParameters["ProgScheduleType"] -Option Constant
+    Set-Variable -Name "ProgTime" -Value $UpdatedParameters["ProgTime"] -Option Constant
 
     Set-Variable -Name "Platform" -Value $(Get-Platform) -Option Constant
     $Paths = Resolve-Paths
@@ -580,13 +595,15 @@ try {
     Set-Variable -Name "SystemdService" -Value $Paths["SystemdService"] -Option Constant
     Set-Variable -Name "SystemdTimer" -Value $Paths["SystemdTimer"] -Option Constant
 
-    Write-Host "Action: $Action"
-    if ($Action -ne "uninstall") {
-        Write-Host "Schedule Type: $ScheduleType"
-        Write-Host "Time: $Time"
+    # Display action details
+    Write-Host "Action: $ProgAction"
+    if ($ProgAction -ne "uninstall") {
+        Write-Host "Schedule Type: $ProgScheduleType"
+        Write-Host "Time: $ProgTime"
     }
 
-    if ($Action -ne "uninstall") {
+    # Perform actions based on Action
+    if ($ProgAction -ne "uninstall") {
         Update-Config
         Install-Script
         Set-Task
