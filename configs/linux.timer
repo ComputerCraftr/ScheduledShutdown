@@ -3,7 +3,6 @@ Description=Timer for Scheduled Shutdown/Restart
 
 [Timer]
 OnCalendar=*-*-* 22:00:00  # Updated dynamically
-Persistent=true
 
 [Install]
 WantedBy=timers.target
