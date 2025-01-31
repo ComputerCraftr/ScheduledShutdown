@@ -126,25 +126,27 @@ function Resolve-Paths {
         # Determine script root path
         $ScriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Resolve-Path "." }
 
-        # Common paths for pwsh
-        $PossiblePaths = @(
-            "/usr/bin/pwsh",
-            "/usr/local/bin/pwsh",
-            "/snap/bin/pwsh"
-        )
-
-        # Attempt to resolve pwsh path
         $PwshPath = $null
-        foreach ($Path in $PossiblePaths) {
-            if (Test-Path $Path) {
-                $PwshPath = $Path
-                break
-            }
-        }
+        if ($Platform -eq "macOS" -or $Platform -eq "Linux") {
+            # Common paths for pwsh
+            $PossiblePaths = @(
+                "/usr/bin/pwsh",
+                "/usr/local/bin/pwsh",
+                "/snap/bin/pwsh"
+            )
 
-        # Fallback to Get-Command
-        if (-not $PwshPath) {
-            $PwshPath = (Get-Command pwsh).Source
+            # Attempt to resolve pwsh path
+            foreach ($Path in $PossiblePaths) {
+                if (Test-Path $Path) {
+                    $PwshPath = $Path
+                    break
+                }
+            }
+
+            # Fallback to Get-Command
+            if (-not $PwshPath) {
+                $PwshPath = (Get-Command pwsh).Source
+            }
         }
 
         # Define common values
