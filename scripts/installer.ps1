@@ -126,18 +126,40 @@ function Resolve-Paths {
         # Determine script root path
         $ScriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Resolve-Path "." }
 
+        # Common paths for pwsh
+        $PossiblePaths = @(
+            "/usr/bin/pwsh",
+            "/usr/local/bin/pwsh",
+            "/snap/bin/pwsh"
+        )
+
+        # Attempt to resolve pwsh path
+        $PwshPath = $null
+        foreach ($Path in $PossiblePaths) {
+            if (Test-Path $Path) {
+                $PwshPath = $Path
+                break
+            }
+        }
+
+        # Fallback to Get-Command
+        if (-not $PwshPath) {
+            $PwshPath = (Get-Command pwsh).Source
+        }
+
         # Define common values
         $BaseName = $ScriptName
         $BaseNameUpper = $BaseName.Substring(0, 1).ToUpper() + $BaseName.Substring(1)
         $ScriptFileName = "$BaseName.ps1"
 
-        # Initialize platform-specific variables
+        # Resolve platform-specific paths
         $Paths = switch ($Platform) {
             "Windows" {
                 @{
                     ScriptRoot     = $ScriptRoot
                     ScriptPath     = "C:\Program Files\$BaseNameUpper\$ScriptFileName"
                     ConfigPath     = Join-Path $ScriptRoot "..\configs\windows.xml"
+                    PwshPath       = $PwshPath
                     TaskName       = $BaseNameUpper
                     DaemonPath     = $null
                     SystemdService = $null
@@ -149,6 +171,7 @@ function Resolve-Paths {
                     ScriptRoot     = $ScriptRoot
                     ScriptPath     = "/usr/local/bin/$ScriptFileName"
                     ConfigPath     = Join-Path $ScriptRoot "..\configs\macos.plist"
+                    PwshPath       = $PwshPath
                     DaemonPath     = "/Library/LaunchDaemons/com.user.$BaseName.plist"
                     TaskName       = $null
                     SystemdService = $null
@@ -160,6 +183,7 @@ function Resolve-Paths {
                     ScriptRoot     = $ScriptRoot
                     ScriptPath     = "/usr/local/bin/$ScriptFileName"
                     ConfigPath     = Join-Path $ScriptRoot "..\configs"
+                    PwshPath       = $PwshPath
                     SystemdService = "/etc/systemd/system/$BaseName.service"
                     SystemdTimer   = "/etc/systemd/system/$BaseName.timer"
                     TaskName       = $null
@@ -371,7 +395,12 @@ function Update-Config {
                 $ProgramArguments = $PlistXml.SelectNodes("//key[normalize-space(text())='ProgramArguments']")
                 if ($ProgramArguments.Count -gt 0) {
                     $ArgumentsArray = $ProgramArguments[0].NextSibling
+                    $ArgumentsArray.FirstChild.InnerText = $PwshPath
                     foreach ($Item in $ArgumentsArray.ChildNodes) {
+                        if ($Item.InnerText -eq "-File") {
+                            $Item.NextSibling.InnerText = $ScriptPath
+                            Write-Host "Updated ProgramArguments: $ScriptPath"
+                        }
                         if ($Item.InnerText -eq "-Action") {
                             $Item.NextSibling.InnerText = $ProgScheduleType
                             Write-Host "Updated ProgramArguments: $ProgScheduleType"
@@ -426,7 +455,7 @@ function Update-Config {
 
                 # Update systemd service file
                 $(Get-Content $ServicePath) `
-                    -replace "ExecStart=.*", "ExecStart=/usr/bin/pwsh $ScriptPath -Action $ProgScheduleType" |
+                    -replace "ExecStart=.*", "ExecStart=$PwshPath $ScriptPath -Action $ProgScheduleType" |
                 Set-Content $ServicePath
                 Write-Host "Updated systemd service ExecStart."
 
@@ -590,6 +619,7 @@ try {
     Set-Variable -Name "ScriptRoot" -Value $Paths["ScriptRoot"] -Option Constant
     Set-Variable -Name "ScriptPath" -Value $Paths["ScriptPath"] -Option Constant
     Set-Variable -Name "ConfigPath" -Value $Paths["ConfigPath"] -Option Constant
+    Set-Variable -Name "PwshPath" -Value $Paths["PwshPath"] -Option Constant
     Set-Variable -Name "TaskName" -Value $Paths["TaskName"] -Option Constant
     Set-Variable -Name "DaemonPath" -Value $Paths["DaemonPath"] -Option Constant
     Set-Variable -Name "SystemdService" -Value $Paths["SystemdService"] -Option Constant
