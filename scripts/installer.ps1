@@ -4,6 +4,8 @@ Param (
     [ValidateSet("shutdown", "restart", IgnoreCase = $true)]
     [string]$ScheduleType, # No default schedule type
     [string]$Time, # No default time
+    [ValidateRange(0, 1440)]
+    [int]$RandomDelayMinutes, # Optional random delay window in minutes
     [switch]$Help # Show help
 )
 
@@ -17,17 +19,18 @@ function Show-Help {
 Scheduled Shutdown/Restart Installer
 
 Usage:
-    pwsh installer.ps1 -Action <install|reinstall|uninstall> -ScheduleType <shutdown|restart> -Time <HH:mm>
+    pwsh installer.ps1 -Action <install|reinstall|uninstall> -ScheduleType <shutdown|restart> -Time <HH:mm> [-RandomDelayMinutes <0-1440>]
 
 Options:
     -Action         The action to perform: install, reinstall, or uninstall.
     -ScheduleType   The schedule type: shutdown or restart.
     -Time           The time to schedule the action in 24-hour format (HH:mm).
+    -RandomDelayMinutes Optional randomized delay window (0-1440 minutes) to stagger systems.
     -Help           Display this help message.
 
 Examples:
     Install with shutdown at 22:00:
-        pwsh installer.ps1 -Action install -ScheduleType shutdown -Time 22:00
+        pwsh installer.ps1 -Action install -ScheduleType shutdown -Time 22:00 -RandomDelayMinutes 30
 
     Reinstall with restart at 08:30:
         pwsh installer.ps1 -Action reinstall -ScheduleType restart -Time 08:30
@@ -94,18 +97,27 @@ function Test-Parameters {
             if (-not ($Minute -as [int] -ge 0 -and $Minute -as [int] -lt 60)) {
                 throw "Invalid minute. Minute must be between 00 and 59."
             }
+
+            if ($null -eq $RandomDelayMinutes) {
+                $RandomDelayMinutes = 0
+            }
+            elseif ($RandomDelayMinutes -lt 0) {
+                throw "Invalid random delay. Minutes must be 0 or greater."
+            }
         }
         else {
             # Set ScheduleType and Time to null for uninstall action
             $ScheduleType = $null
             $Time = $null
+            $RandomDelayMinutes = 0
         }
 
         # Return updated parameters
         return @{
-            ProgAction       = $Action
-            ProgScheduleType = $ScheduleType
-            ProgTime         = $Time
+            ProgAction             = $Action
+            ProgScheduleType       = $ScheduleType
+            ProgTime               = $Time
+            ProgRandomDelayMinutes = $RandomDelayMinutes
         }
     }
     catch {
@@ -366,6 +378,18 @@ function Update-Config {
                     throw "Arguments node not found in XML."
                 }
                 $ArgumentsNode.InnerText = $ArgumentsNode.InnerText -replace "-Action \S+", "-Action $ProgScheduleType"
+
+                if ($ProgRandomDelayMinutes -gt 0) {
+                    if ($ArgumentsNode.InnerText -match "-RandomDelayMinutes\s+\d+") {
+                        $ArgumentsNode.InnerText = $ArgumentsNode.InnerText -replace "-RandomDelayMinutes\s+\d+", "-RandomDelayMinutes $ProgRandomDelayMinutes"
+                    }
+                    else {
+                        $ArgumentsNode.InnerText = "$($ArgumentsNode.InnerText) -RandomDelayMinutes $ProgRandomDelayMinutes"
+                    }
+                }
+                else {
+                    $ArgumentsNode.InnerText = ($ArgumentsNode.InnerText -replace "\s*-RandomDelayMinutes\s+\d+", "").Trim()
+                }
                 Write-Host "Updated Arguments: $($ArgumentsNode.InnerText)"
 
                 # Save updated XML with correct encoding
@@ -398,6 +422,7 @@ function Update-Config {
                 if ($ProgramArguments.Count -gt 0) {
                     $ArgumentsArray = $ProgramArguments[0].NextSibling
                     $ArgumentsArray.FirstChild.InnerText = $PwshPath
+                    $RandomDelayNode = $null
                     foreach ($Item in $ArgumentsArray.ChildNodes) {
                         if ($Item.InnerText -eq "-File") {
                             $Item.NextSibling.InnerText = $ScriptPath
@@ -407,6 +432,28 @@ function Update-Config {
                             $Item.NextSibling.InnerText = $ProgScheduleType
                             Write-Host "Updated ProgramArguments: $ProgScheduleType"
                         }
+                        if ($Item.InnerText -eq "-RandomDelayMinutes") {
+                            $RandomDelayNode = $Item
+                        }
+                    }
+
+                    if ($RandomDelayNode) {
+                        if ($ProgRandomDelayMinutes -gt 0) {
+                            $RandomDelayNode.NextSibling.InnerText = "$ProgRandomDelayMinutes"
+                        }
+                        else {
+                            $ValueNode = $RandomDelayNode.NextSibling
+                            $ArgumentsArray.RemoveChild($ValueNode) | Out-Null
+                            $ArgumentsArray.RemoveChild($RandomDelayNode) | Out-Null
+                        }
+                    }
+                    elseif ($ProgRandomDelayMinutes -gt 0) {
+                        $DelayFlag = $PlistXml.CreateElement("string")
+                        $DelayFlag.InnerText = "-RandomDelayMinutes"
+                        $DelayValue = $PlistXml.CreateElement("string")
+                        $DelayValue.InnerText = "$ProgRandomDelayMinutes"
+                        $ArgumentsArray.AppendChild($DelayFlag) | Out-Null
+                        $ArgumentsArray.AppendChild($DelayValue) | Out-Null
                     }
                 }
 
@@ -456,8 +503,12 @@ function Update-Config {
                 $TimerPath = Join-Path $ConfigPath "linux.timer"
 
                 # Update systemd service file
+                $ExecStart = "ExecStart=$PwshPath $ScriptPath -Action $ProgScheduleType"
+                if ($ProgRandomDelayMinutes -gt 0) {
+                    $ExecStart = "$ExecStart -RandomDelayMinutes $ProgRandomDelayMinutes"
+                }
                 $(Get-Content $ServicePath) `
-                    -replace "ExecStart=.*", "ExecStart=$PwshPath $ScriptPath -Action $ProgScheduleType" |
+                    -replace "ExecStart=.*", $ExecStart |
                 Set-Content $ServicePath
                 Write-Host "Updated systemd service ExecStart."
 
@@ -613,6 +664,7 @@ try {
     Set-Variable -Name "ProgAction" -Value $UpdatedParameters["ProgAction"] -Option Constant
     Set-Variable -Name "ProgScheduleType" -Value $UpdatedParameters["ProgScheduleType"] -Option Constant
     Set-Variable -Name "ProgTime" -Value $UpdatedParameters["ProgTime"] -Option Constant
+    Set-Variable -Name "ProgRandomDelayMinutes" -Value $UpdatedParameters["ProgRandomDelayMinutes"] -Option Constant
 
     Set-Variable -Name "Platform" -Value $(Get-Platform) -Option Constant
     $Paths = Resolve-Paths
@@ -632,6 +684,7 @@ try {
     if ($ProgAction -ne "uninstall") {
         Write-Host "Schedule Type: $ProgScheduleType"
         Write-Host "Time: $ProgTime"
+        Write-Host "Random Delay Minutes: $ProgRandomDelayMinutes"
     }
 
     # Perform actions based on Action

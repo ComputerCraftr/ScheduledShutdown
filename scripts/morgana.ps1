@@ -1,6 +1,8 @@
 Param (
     [ValidateSet("shutdown", "restart", IgnoreCase = $true)]
-    [string]$Action = "shutdown"  # Default action
+    [string]$Action = "shutdown",  # Default action
+    [ValidateRange(0, 1440)]
+    [int]$RandomDelayMinutes = 0
 )
 
 # Enable strict mode and configure error handling
@@ -18,6 +20,15 @@ if ($PSVersionTable.PSEdition -ne "Core") {
 
 # Perform the action based on platform and input
 try {
+    if ($RandomDelayMinutes -gt 0) {
+        $MaxDelaySeconds = $RandomDelayMinutes * 60
+        $DelaySeconds = Get-Random -Minimum 0 -Maximum ($MaxDelaySeconds + 1)
+        if ($DelaySeconds -gt 0) {
+            Write-Host "Delaying $Action by $DelaySeconds seconds to stagger schedules..."
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+
     switch ($Action) {
         "shutdown" {
             if ($IsWindows) {
