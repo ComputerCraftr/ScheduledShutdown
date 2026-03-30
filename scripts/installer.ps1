@@ -138,27 +138,44 @@ function Resolve-Paths {
         # Determine script root path
         $ScriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Resolve-Path "." }
 
-        $PwshPath = $null
-        if ($Platform -eq "macOS" -or $Platform -eq "Linux") {
-            # Common paths for pwsh
-            $PossiblePaths = @(
-                "/usr/bin/pwsh",
-                "/usr/local/bin/pwsh",
-                "/snap/bin/pwsh"
-            )
+        $PwshCommand = Get-Command pwsh -ErrorAction SilentlyContinue
+        $PwshPath = if ($PwshCommand) { $PwshCommand.Source } else { $null }
 
-            # Attempt to resolve pwsh path
+        if (-not $PwshPath) {
+            $PossiblePaths = switch ($Platform) {
+                "Windows" {
+                    @(
+                        "C:\Program Files\PowerShell\7\pwsh.exe",
+                        "C:\Program Files\PowerShell\6\pwsh.exe"
+                    )
+                }
+                "macOS" {
+                    @(
+                        "/opt/homebrew/bin/pwsh",
+                        "/usr/local/bin/pwsh",
+                        "/usr/bin/pwsh"
+                    )
+                }
+                "Linux" {
+                    @(
+                        "/usr/bin/pwsh",
+                        "/usr/local/bin/pwsh",
+                        "/snap/bin/pwsh"
+                    )
+                }
+                default { @() }
+            }
+
             foreach ($Path in $PossiblePaths) {
                 if (Test-Path $Path) {
                     $PwshPath = $Path
                     break
                 }
             }
+        }
 
-            # Fallback to Get-Command
-            if (-not $PwshPath) {
-                $PwshPath = (Get-Command pwsh).Source
-            }
+        if (-not $PwshPath -and $ProgAction -ne "uninstall") {
+            throw "Unable to locate pwsh. Ensure PowerShell is installed and available in PATH."
         }
 
         # Define common values
@@ -371,6 +388,13 @@ function Update-Config {
                 }
                 $StartBoundaryNode.InnerText = "2024-11-24T$($ProgTime):00"
                 Write-Host "Updated StartBoundary: $($StartBoundaryNode.InnerText)"
+
+                $CommandNode = $TaskXml.SelectSingleNode("//task:Actions/task:Exec/task:Command", $NamespaceManager)
+                if (-not $CommandNode) {
+                    throw "Command node not found in XML."
+                }
+                $CommandNode.InnerText = $PwshPath
+                Write-Host "Updated Command: $($CommandNode.InnerText)"
 
                 # Update the -Action parameter in Arguments
                 $ArgumentsNode = $TaskXml.SelectSingleNode("//task:Actions/task:Exec/task:Arguments", $NamespaceManager)

@@ -6,7 +6,7 @@
         <string>com.user.morgana</string>
         <key>ProgramArguments</key>
         <array>
-            <string>/usr/local/bin/pwsh</string>
+            <string>/opt/homebrew/bin/pwsh</string>
             <string>-File</string>
             <string>/usr/local/bin/morgana.ps1</string>
             <string>-Action</string>
